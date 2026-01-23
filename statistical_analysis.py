@@ -320,10 +320,10 @@ def validate_data(df: pd.DataFrame) -> None:
         print(f"  ✓ All ratings valid (0-4000)")
     
     # Check for agreement
-    both_correct = (df['cnn_correct'] & df['transformer_correct']).sum()
-    both_wrong = (~df['cnn_correct'] & ~df['transformer_correct']).sum()
-    cnn_only = (df['cnn_correct'] & ~df['transformer_correct']).sum()
-    trans_only = (~df['cnn_correct'] & df['transformer_correct']).sum()
+    both_correct = (df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
+    both_wrong = (~df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
+    cnn_only = (df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
+    trans_only = (~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
     
     print(f"\nPrediction Agreement:")
     print(f"  Both correct: {both_correct:,} ({100*both_correct/len(df):.2f}%)")
@@ -527,8 +527,8 @@ def mcnemar_test(df: pd.DataFrame, output_dir: str) -> Dict[str, Any]:
     # Create contingency table
     # b: CNN correct, Transformer wrong
     # c: CNN wrong, Transformer correct
-    b = ((df['cnn_correct']) & (~df['transformer_correct'])).sum()
-    c = ((~df['cnn_correct']) & (df['transformer_correct'])).sum()
+    b = (df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
+    c = (~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
     
     # McNemar's test statistic
     if b + c > 0:
@@ -868,8 +868,10 @@ def phase_stratification(df: pd.DataFrame, output_dir: str) -> pd.DataFrame:
     print("Extracting game phases from FEN positions...")
     
     # Extract game phase with progress bar
-    tqdm.pandas(desc="Parsing FENs")
-    df['game_phase'] = df['FEN'].progress_apply(extract_game_phase)
+    game_phases = []
+    for fen in tqdm(df['FEN'], desc="Parsing FENs"):
+        game_phases.append(extract_game_phase(fen))
+    df['game_phase'] = game_phases
     
     # Calculate accuracy per phase
     results = []
@@ -961,10 +963,10 @@ def error_pattern_analysis(df: pd.DataFrame, output_dir: str) -> None:
     print("\n📊 Error Pattern Analysis...")
     
     # Create confusion matrix style data
-    both_correct = (df['cnn_correct'] & df['transformer_correct']).sum()
-    both_wrong = (~df['cnn_correct'] & ~df['transformer_correct']).sum()
-    cnn_only = (df['cnn_correct'] & ~df['transformer_correct']).sum()
-    trans_only = (~df['cnn_correct'] & df['transformer_correct']).sum()
+    both_correct = (df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
+    both_wrong = (~df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
+    cnn_only = (df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
+    trans_only = (~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
     
     total = len(df)
     
@@ -1004,8 +1006,8 @@ def feature_correlation_analysis(df: pd.DataFrame, output_dir: str) -> None:
     print("\n📊 Feature Correlation Analysis...")
     
     # Create error indicators
-    df['cnn_error'] = (~df['cnn_correct']).astype(int)
-    df['trans_error'] = (~df['transformer_correct']).astype(int)
+    df['cnn_error'] = (~df['cnn_correct'].astype(bool)).astype(int)
+    df['trans_error'] = (~df['transformer_correct'].astype(bool)).astype(int)
     
     # Select numeric features
     features = ['Rating', 'RatingDeviation', 'Popularity', 'NbPlays']
@@ -1075,10 +1077,10 @@ def generate_summary_statistics(df: pd.DataFrame, output_dir: str, **kwargs) -> 
         f"{df['cnn_correct'].mean() * 100:.2f}",
         f"{df['transformer_correct'].mean() * 100:.2f}",
         f"{(df['transformer_correct'].mean() - df['cnn_correct'].mean()) * 100:.2f}",
-        f"{((df['cnn_correct'] & df['transformer_correct']).sum() / len(df)) * 100:.2f}",
-        f"{((~df['cnn_correct'] & ~df['transformer_correct']).sum() / len(df)) * 100:.2f}",
-        f"{((df['cnn_correct'] & ~df['transformer_correct']).sum() / len(df)) * 100:.2f}",
-        f"{((~df['cnn_correct'] & df['transformer_correct']).sum() / len(df)) * 100:.2f}"
+        f"{((df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum() / len(df)) * 100:.2f}",
+        f"{((~df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum() / len(df)) * 100:.2f}",
+        f"{((df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum() / len(df)) * 100:.2f}",
+        f"{((~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum() / len(df)) * 100:.2f}"
     ])
     
     # Add additional statistics from kwargs
@@ -1171,10 +1173,10 @@ def generate_markdown_report(
         
         # Prediction Agreement
         f.write("## Prediction Agreement\n\n")
-        both_correct = (df['cnn_correct'] & df['transformer_correct']).sum()
-        both_wrong = (~df['cnn_correct'] & ~df['transformer_correct']).sum()
-        cnn_only = (df['cnn_correct'] & ~df['transformer_correct']).sum()
-        trans_only = (~df['cnn_correct'] & df['transformer_correct']).sum()
+        both_correct = (df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
+        both_wrong = (~df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
+        cnn_only = (df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
+        trans_only = (~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
         
         f.write("| Category | Count | Percentage |\n")
         f.write("|----------|-------|------------|\n")

@@ -1,0 +1,14 @@
+Metric,Value
+Total Puzzles,"5,000"
+CNN Accuracy (%),38.08
+Transformer Accuracy (%),38.00
+Accuracy Difference (%),-0.08
+Both Correct (%),27.92
+Both Wrong (%),51.84
+CNN Only Correct (%),10.16
+Transformer Only Correct (%),10.08
+CNN Top-5 Accuracy (%),74.94
+Transformer Top-5 Accuracy (%),77.10
+McNemar Chi-square,0.01
+McNemar P-value,0.92
+Bootstrap Iterations,100

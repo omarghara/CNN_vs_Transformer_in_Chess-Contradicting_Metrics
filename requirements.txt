@@ -14,3 +14,9 @@ tqdm>=4.62.0
 # Statistical analysis
 scikit-learn>=0.24.0
 statsmodels>=0.13.0
+
+# Markdown table generation
+tabulate>=0.8.0
+
+# System utilities
+psutil>=5.8.0
