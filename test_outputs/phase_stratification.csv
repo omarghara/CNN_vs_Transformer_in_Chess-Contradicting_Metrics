@@ -1,4 +1,0 @@
-Phase,Count,CNN Accuracy (%),Transformer Accuracy (%),Difference (%),Cohen's d
-Opening,1712,35.57,35.98,0.41,0.01
-Middlegame,2348,39.01,39.31,0.30,0.01
-Endgame,940,40.32,38.40,-1.91,-0.04
