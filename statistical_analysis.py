@@ -487,6 +487,55 @@ def calculate_top3_accuracy(df: pd.DataFrame) -> Tuple[float, float]:
     return cnn_top3_acc, trans_top3_acc
 
 
+def add_top3_correct_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add top-3 correctness columns to the DataFrame.
+    
+    Args:
+        df: DataFrame with top5 moves columns
+        
+    Returns:
+        DataFrame with added columns: cnn_first_move_top3_correct and transformer_first_move_top3_correct
+    """
+    print("\n📊 Adding Top-3 Correctness Columns...")
+    
+    df_copy = prepare_ground_truth(df)
+    
+    # Calculate top-3 correctness for each row
+    cnn_top3_correct_list = []
+    trans_top3_correct_list = []
+    
+    for idx, row in tqdm(df_copy.iterrows(), total=len(df_copy), desc="Computing top-3 correctness"):
+        ground_truth = row['ground_truth']
+        if ground_truth is None:
+            cnn_top3_correct_list.append(0)
+            trans_top3_correct_list.append(0)
+            continue
+        
+        # CNN top-3 (first 3 from top-5)
+        cnn_top5 = parse_top5_moves(row.get('cnn_top5_moves', ''))
+        cnn_top3 = cnn_top5[:3] if len(cnn_top5) >= 3 else cnn_top5
+        cnn_top3_correct_list.append(1 if ground_truth in cnn_top3 else 0)
+        
+        # Transformer top-3 (first 3 from top-5)
+        trans_top5 = parse_top5_moves(row.get('transformer_top5_moves', ''))
+        trans_top3 = trans_top5[:3] if len(trans_top5) >= 3 else trans_top5
+        trans_top3_correct_list.append(1 if ground_truth in trans_top3 else 0)
+    
+    # Add columns to original dataframe
+    df['cnn_first_move_top3_correct'] = cnn_top3_correct_list
+    df['transformer_first_move_top3_correct'] = trans_top3_correct_list
+    
+    cnn_top3_acc = np.mean(cnn_top3_correct_list) * 100
+    trans_top3_acc = np.mean(trans_top3_correct_list) * 100
+    
+    print(f"✓ Added top-3 correctness columns")
+    print(f"  CNN Top-3 Accuracy: {cnn_top3_acc:.2f}%")
+    print(f"  Transformer Top-3 Accuracy: {trans_top3_acc:.2f}%")
+    
+    return df
+
+
 def generate_topk_accuracy_summary(
     output_dir: str,
     topk_accuracy: Tuple[float, float],
@@ -565,6 +614,660 @@ def generate_top5_accuracy_summary(
         df: Main DataFrame
     """
     generate_topk_accuracy_summary(output_dir, top5_accuracy, df, 5)
+
+
+def bootstrap_analysis_topk(
+    df: pd.DataFrame,
+    n_iterations: int,
+    output_dir: str,
+    seed: int,
+    cnn_col: str,
+    trans_col: str,
+    k: int
+) -> Dict[str, Any]:
+    """
+    Perform bootstrap analysis for confidence intervals using topk columns.
+    
+    Args:
+        df: DataFrame with model predictions
+        n_iterations: Number of bootstrap iterations
+        output_dir: Directory for output files
+        seed: Random seed
+        cnn_col: Name of CNN correctness column (e.g., 'cnn_first_move_top5_correct')
+        trans_col: Name of Transformer correctness column
+        k: Value of k (3 or 5)
+        
+    Returns:
+        Dictionary with bootstrap results
+    """
+    print(f"\n🔄 Bootstrap Analysis for Top-{k} ({n_iterations} iterations)...")
+    np.random.seed(seed)
+    
+    cnn_correct = df[cnn_col].values
+    trans_correct = df[trans_col].values
+    
+    # Bootstrap sampling
+    cnn_accs = []
+    trans_accs = []
+    differences = []
+    
+    for _ in tqdm(range(n_iterations), desc=f"Bootstrap sampling top-{k}"):
+        # Sample with replacement
+        indices = np.random.choice(len(df), size=len(df), replace=True)
+        
+        cnn_sample = cnn_correct[indices]
+        trans_sample = trans_correct[indices]
+        
+        cnn_acc = np.mean(cnn_sample) * 100
+        trans_acc = np.mean(trans_sample) * 100
+        
+        cnn_accs.append(cnn_acc)
+        trans_accs.append(trans_acc)
+        differences.append(trans_acc - cnn_acc)
+    
+    # Calculate confidence intervals
+    cnn_ci = np.percentile(cnn_accs, [2.5, 97.5])
+    trans_ci = np.percentile(trans_accs, [2.5, 97.5])
+    diff_ci = np.percentile(differences, [2.5, 97.5])
+    
+    results = {
+        'cnn_mean': np.mean(cnn_accs),
+        'cnn_ci': cnn_ci,
+        'trans_mean': np.mean(trans_accs),
+        'trans_ci': trans_ci,
+        'diff_mean': np.mean(differences),
+        'diff_ci': diff_ci,
+        'cnn_accs': cnn_accs,
+        'trans_accs': trans_accs,
+        'differences': differences
+    }
+    
+    print(f"\nBootstrap Results (Top-{k}):")
+    print(f"  CNN: {results['cnn_mean']:.2f}% (95% CI: [{cnn_ci[0]:.2f}, {cnn_ci[1]:.2f}])")
+    print(f"  Transformer: {results['trans_mean']:.2f}% (95% CI: [{trans_ci[0]:.2f}, {trans_ci[1]:.2f}])")
+    print(f"  Difference: {results['diff_mean']:.2f}% (95% CI: [{diff_ci[0]:.2f}, {diff_ci[1]:.2f}])")
+    
+    # Visualization 1: Distribution of differences
+    plt.figure(figsize=(10, 6))
+    plt.hist(differences, bins=50, alpha=0.7, edgecolor='black')
+    plt.axvline(0, color='red', linestyle='--', linewidth=2, label='No difference')
+    plt.axvline(diff_ci[0], color='blue', linestyle='--', label='95% CI')
+    plt.axvline(diff_ci[1], color='blue', linestyle='--')
+    plt.xlabel('Accuracy Difference (Transformer - CNN) %')
+    plt.ylabel('Frequency')
+    plt.title(f'Bootstrap Distribution of Top-{k} Accuracy Difference ({n_iterations} iterations)')
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f'top{k}_bootstrap_distribution.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Visualization 2: Confidence intervals
+    fig, ax = plt.subplots(figsize=(10, 6))
+    models = ['CNN', 'Transformer']
+    means = [results['cnn_mean'], results['trans_mean']]
+    cis = [cnn_ci, trans_ci]
+    
+    y_pos = np.arange(len(models))
+    ax.barh(y_pos, means, alpha=0.6, color=['blue', 'green'])
+    ax.errorbar(means, y_pos, xerr=[[m - ci[0] for m, ci in zip(means, cis)],
+                                     [ci[1] - m for m, ci in zip(means, cis)]],
+                fmt='none', ecolor='black', capsize=5, linewidth=2)
+    
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(models)
+    ax.set_xlabel('Accuracy (%)')
+    ax.set_title(f'Top-{k} Model Accuracy with 95% Bootstrap Confidence Intervals')
+    ax.grid(axis='x', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f'top{k}_bootstrap_confidence.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✓ Saved top-{k} bootstrap visualizations")
+    
+    return results
+
+
+def mcnemar_test_topk(df: pd.DataFrame, output_dir: str, cnn_col: str, trans_col: str, k: int) -> Dict[str, Any]:
+    """
+    Perform McNemar's test for paired binary data using topk columns.
+    
+    Args:
+        df: DataFrame with model predictions
+        output_dir: Directory for output files
+        cnn_col: Name of CNN correctness column
+        trans_col: Name of Transformer correctness column
+        k: Value of k (3 or 5)
+        
+    Returns:
+        Dictionary with test results
+    """
+    print(f"\n🧪 McNemar's Test for Top-{k}...")
+    
+    # Create contingency table
+    # b: CNN correct, Transformer wrong
+    # c: CNN wrong, Transformer correct
+    b = (df[cnn_col].astype(bool) & ~df[trans_col].astype(bool)).sum()
+    c = (~df[cnn_col].astype(bool) & df[trans_col].astype(bool)).sum()
+    
+    # McNemar's test statistic
+    if b + c > 0:
+        chi2 = ((abs(b - c) - 1) ** 2) / (b + c)  # with continuity correction
+        p_value = 1 - stats.chi2.cdf(chi2, df=1)
+    else:
+        chi2 = 0
+        p_value = 1.0
+    
+    results = {
+        'b': b,
+        'c': c,
+        'chi2': chi2,
+        'p_value': p_value
+    }
+    
+    # Save results
+    with open(os.path.join(output_dir, f'top{k}_mcnemar_test.txt'), 'w') as f:
+        f.write(f"McNemar's Test Results (Top-{k})\n")
+        f.write("=" * 50 + "\n\n")
+        f.write(f"Contingency Table:\n")
+        f.write(f"  CNN correct, Transformer wrong (b): {b:,}\n")
+        f.write(f"  CNN wrong, Transformer correct (c): {c:,}\n\n")
+        f.write(f"Test Statistics:\n")
+        f.write(f"  Chi-square statistic: {chi2:.4f}\n")
+        f.write(f"  P-value: {p_value:.6f}\n\n")
+        
+        if p_value < 0.001:
+            sig = "*** (highly significant)"
+        elif p_value < 0.01:
+            sig = "** (very significant)"
+        elif p_value < 0.05:
+            sig = "* (significant)"
+        else:
+            sig = "(not significant)"
+        
+        f.write(f"Interpretation: {sig}\n")
+        f.write(f"\nNull Hypothesis: The two models have equal top-{k} performance\n")
+        f.write(f"Alternative Hypothesis: The two models have different top-{k} performance\n")
+    
+    print(f"  Chi-square: {chi2:.4f}, p-value: {p_value:.6f}")
+    print(f"✓ Saved McNemar's test results for top-{k}")
+    
+    return results
+
+
+def rating_stratification_topk(df: pd.DataFrame, output_dir: str, cnn_col: str, trans_col: str, k: int) -> pd.DataFrame:
+    """
+    Perform rating stratification analysis using topk columns.
+    
+    Args:
+        df: DataFrame with model predictions
+        output_dir: Directory for output files
+        cnn_col: Name of CNN correctness column
+        trans_col: Name of Transformer correctness column
+        k: Value of k (3 or 5)
+        
+    Returns:
+        DataFrame with stratified results
+    """
+    print(f"\n📊 Rating Stratification Analysis for Top-{k}...")
+    
+    # Create rating bins
+    bins = [0, 800, 1200, 1600, 2000, 2400, 2800, 3500]
+    labels = ['400-800', '800-1200', '1200-1600', '1600-2000', '2000-2400', '2400-2800', '2800+']
+    
+    df['rating_bin'] = pd.cut(df['Rating'], bins=bins, labels=labels)
+    
+    # Calculate accuracy per bin
+    results = []
+    for bin_label in labels:
+        bin_data = df[df['rating_bin'] == bin_label]
+        
+        if len(bin_data) == 0:
+            continue
+        
+        cnn_acc = bin_data[cnn_col].mean() * 100
+        trans_acc = bin_data[trans_col].mean() * 100
+        diff = trans_acc - cnn_acc
+        count = len(bin_data)
+        
+        # Calculate effect size
+        effect_size = cohens_d(
+            bin_data[trans_col].values,
+            bin_data[cnn_col].values
+        )
+        
+        results.append({
+            'Rating Bin': bin_label,
+            'Count': count,
+            'CNN Accuracy (%)': cnn_acc,
+            'Transformer Accuracy (%)': trans_acc,
+            'Difference (%)': diff,
+            'Cohen\'s d': effect_size
+        })
+    
+    results_df = pd.DataFrame(results)
+    
+    # Save to CSV
+    results_df.to_csv(
+        os.path.join(output_dir, f'top{k}_rating_stratification.csv'),
+        index=False,
+        float_format='%.2f'
+    )
+    
+    # Visualization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Plot 1: Accuracy by rating bin
+    x = np.arange(len(results_df))
+    width = 0.35
+    
+    ax1.bar(x - width/2, results_df['CNN Accuracy (%)'], width, label='CNN', alpha=0.8)
+    ax1.bar(x + width/2, results_df['Transformer Accuracy (%)'], width, label='Transformer', alpha=0.8)
+    ax1.set_xlabel('Rating Bin')
+    ax1.set_ylabel('Accuracy (%)')
+    ax1.set_title(f'Top-{k} Model Accuracy by Rating Bin')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(results_df['Rating Bin'], rotation=45)
+    ax1.legend()
+    ax1.grid(axis='y', alpha=0.3)
+    
+    # Plot 2: Difference (Transformer - CNN)
+    colors = ['green' if d > 0 else 'red' for d in results_df['Difference (%)']]
+    ax2.bar(x, results_df['Difference (%)'], color=colors, alpha=0.6)
+    ax2.axhline(0, color='black', linestyle='--', linewidth=1)
+    ax2.set_xlabel('Rating Bin')
+    ax2.set_ylabel('Accuracy Difference (Transformer - CNN) %')
+    ax2.set_title(f'Top-{k} Performance Difference by Rating Bin')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(results_df['Rating Bin'], rotation=45)
+    ax2.grid(axis='y', alpha=0.3)
+    
+    # Add effect size annotations
+    for i, (diff, effect) in enumerate(zip(results_df['Difference (%)'], results_df['Cohen\'s d'])):
+        ax2.text(i, diff, f'd={effect:.2f}', ha='center', va='bottom' if diff > 0 else 'top',
+                fontsize=8)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f'top{k}_rating_stratification.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✓ Saved top-{k} rating stratification results")
+    print(f"\n{results_df.to_string(index=False)}")
+    
+    return results_df
+
+
+def theme_stratification_topk(df: pd.DataFrame, output_dir: str, cnn_col: str, trans_col: str, k: int, top_n: int = 20) -> pd.DataFrame:
+    """
+    Perform theme stratification analysis using topk columns.
+    
+    Args:
+        df: DataFrame with model predictions
+        output_dir: Directory for output files
+        cnn_col: Name of CNN correctness column
+        trans_col: Name of Transformer correctness column
+        k: Value of k (3 or 5)
+        top_n: Number of top themes to analyze
+        
+    Returns:
+        DataFrame with stratified results
+    """
+    print(f"\n📊 Theme Stratification Analysis for Top-{k} (Top {top_n} themes)...")
+    
+    # Parse themes and create weighted accuracy
+    theme_stats = defaultdict(lambda: {cnn_col: 0, trans_col: 0, 'total': 0})
+    
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc=f"Processing themes for top-{k}"):
+        themes = parse_themes(row['Themes'])
+        if not themes:
+            continue
+        
+        weight = 1.0 / len(themes)  # Weight for multi-theme puzzles
+        
+        for theme in themes:
+            theme_stats[theme]['total'] += weight
+            if row[cnn_col]:
+                theme_stats[theme][cnn_col] += weight
+            if row[trans_col]:
+                theme_stats[theme][trans_col] += weight
+    
+    # Calculate accuracy for each theme
+    results = []
+    for theme, stats in theme_stats.items():
+        if stats['total'] < 10:  # Skip themes with very few puzzles
+            continue
+        
+        cnn_acc = (stats[cnn_col] / stats['total']) * 100
+        trans_acc = (stats[trans_col] / stats['total']) * 100
+        diff = trans_acc - cnn_acc
+        
+        results.append({
+            'Theme': theme,
+            'Count': stats['total'],
+            'CNN Accuracy (%)': cnn_acc,
+            'Transformer Accuracy (%)': trans_acc,
+            'Difference (%)': diff
+        })
+    
+    results_df = pd.DataFrame(results)
+    results_df = results_df.sort_values('Count', ascending=False).head(top_n)
+    
+    # Save to CSV
+    results_df.to_csv(
+        os.path.join(output_dir, f'top{k}_theme_stratification.csv'),
+        index=False,
+        float_format='%.2f'
+    )
+    
+    # Visualization
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 12))
+    
+    # Sort by count for visualization
+    plot_df = results_df.sort_values('Count', ascending=True)
+    
+    # Plot 1: Accuracy comparison
+    y = np.arange(len(plot_df))
+    width = 0.35
+    
+    ax1.barh(y - width/2, plot_df['CNN Accuracy (%)'], width, label='CNN', alpha=0.8)
+    ax1.barh(y + width/2, plot_df['Transformer Accuracy (%)'], width, label='Transformer', alpha=0.8)
+    ax1.set_yticks(y)
+    ax1.set_yticklabels(plot_df['Theme'])
+    ax1.set_xlabel('Accuracy (%)')
+    ax1.set_title(f'Top-{k} Model Accuracy by Theme (Top {top_n} by count)')
+    ax1.legend()
+    ax1.grid(axis='x', alpha=0.3)
+    
+    # Plot 2: Difference
+    colors = ['green' if d > 0 else 'red' for d in plot_df['Difference (%)']]
+    ax2.barh(y, plot_df['Difference (%)'], color=colors, alpha=0.6)
+    ax2.axvline(0, color='black', linestyle='--', linewidth=1)
+    ax2.set_yticks(y)
+    ax2.set_yticklabels(plot_df['Theme'])
+    ax2.set_xlabel('Accuracy Difference (Transformer - CNN) %')
+    ax2.set_title(f'Top-{k} Performance Difference by Theme')
+    ax2.grid(axis='x', alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f'top{k}_theme_stratification.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✓ Saved top-{k} theme stratification results")
+    
+    return results_df
+
+
+def phase_stratification_topk(df: pd.DataFrame, output_dir: str, cnn_col: str, trans_col: str, k: int) -> pd.DataFrame:
+    """
+    Perform game phase stratification analysis using topk columns.
+    
+    Args:
+        df: DataFrame with model predictions
+        output_dir: Directory for output files
+        cnn_col: Name of CNN correctness column
+        trans_col: Name of Transformer correctness column
+        k: Value of k (3 or 5)
+        
+    Returns:
+        DataFrame with stratified results
+    """
+    print(f"\n📊 Game Phase Stratification Analysis for Top-{k}...")
+    
+    # Extract game phase if not already present
+    if 'game_phase' not in df.columns:
+        print("Extracting game phases from FEN positions...")
+        game_phases = []
+        for fen in tqdm(df['FEN'], desc="Parsing FENs"):
+            game_phases.append(extract_game_phase(fen))
+        df['game_phase'] = game_phases
+    
+    # Calculate accuracy per phase
+    results = []
+    for phase in ['opening', 'middlegame', 'endgame']:
+        phase_data = df[df['game_phase'] == phase]
+        
+        if len(phase_data) == 0:
+            continue
+        
+        cnn_acc = phase_data[cnn_col].mean() * 100
+        trans_acc = phase_data[trans_col].mean() * 100
+        diff = trans_acc - cnn_acc
+        count = len(phase_data)
+        
+        # Calculate effect size
+        effect_size = cohens_d(
+            phase_data[trans_col].values,
+            phase_data[cnn_col].values
+        )
+        
+        results.append({
+            'Phase': phase.capitalize(),
+            'Count': count,
+            'CNN Accuracy (%)': cnn_acc,
+            'Transformer Accuracy (%)': trans_acc,
+            'Difference (%)': diff,
+            'Cohen\'s d': effect_size
+        })
+    
+    results_df = pd.DataFrame(results)
+    
+    # Save to CSV
+    results_df.to_csv(
+        os.path.join(output_dir, f'top{k}_phase_stratification.csv'),
+        index=False,
+        float_format='%.2f'
+    )
+    
+    # Visualization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Plot 1: Accuracy by phase
+    x = np.arange(len(results_df))
+    width = 0.35
+    
+    ax1.bar(x - width/2, results_df['CNN Accuracy (%)'], width, label='CNN', alpha=0.8)
+    ax1.bar(x + width/2, results_df['Transformer Accuracy (%)'], width, label='Transformer', alpha=0.8)
+    ax1.set_xlabel('Game Phase')
+    ax1.set_ylabel('Accuracy (%)')
+    ax1.set_title(f'Top-{k} Model Accuracy by Game Phase')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(results_df['Phase'])
+    ax1.legend()
+    ax1.grid(axis='y', alpha=0.3)
+    
+    # Plot 2: Difference
+    colors = ['green' if d > 0 else 'red' for d in results_df['Difference (%)']]
+    ax2.bar(x, results_df['Difference (%)'], color=colors, alpha=0.6)
+    ax2.axhline(0, color='black', linestyle='--', linewidth=1)
+    ax2.set_xlabel('Game Phase')
+    ax2.set_ylabel('Accuracy Difference (Transformer - CNN) %')
+    ax2.set_title(f'Top-{k} Performance Difference by Game Phase')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(results_df['Phase'])
+    ax2.grid(axis='y', alpha=0.3)
+    
+    # Add effect size annotations
+    for i, (diff, effect) in enumerate(zip(results_df['Difference (%)'], results_df['Cohen\'s d'])):
+        ax2.text(i, diff, f'd={effect:.2f}', ha='center', va='bottom' if diff > 0 else 'top')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f'top{k}_phase_stratification.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✓ Saved top-{k} phase stratification results")
+    print(f"\n{results_df.to_string(index=False)}")
+    
+    return results_df
+
+
+def generate_topk_markdown_report(
+    output_dir: str,
+    df: pd.DataFrame,
+    bootstrap_results: Dict,
+    mcnemar_results: Dict,
+    rating_df: pd.DataFrame,
+    theme_df: pd.DataFrame,
+    phase_df: pd.DataFrame,
+    topk_accuracy: Tuple[float, float],
+    k: int
+) -> None:
+    """
+    Generate comprehensive markdown report for topk analysis.
+    
+    Args:
+        output_dir: Directory for output files
+        df: Main DataFrame
+        bootstrap_results: Bootstrap analysis results
+        mcnemar_results: McNemar test results
+        rating_df: Rating stratification results
+        theme_df: Theme stratification results
+        phase_df: Phase stratification results
+        topk_accuracy: Tuple of (CNN top-k, Transformer top-k) accuracy
+        k: Value of k (3 or 5)
+    """
+    print(f"\n📝 Generating Top-{k} Comprehensive Markdown Report...")
+    
+    cnn_col = f'cnn_first_move_top{k}_correct' if k == 3 else 'cnn_first_move_top5_correct'
+    trans_col = f'transformer_first_move_top{k}_correct' if k == 3 else 'transformer_first_move_top5_correct'
+    
+    report_path = os.path.join(output_dir, f'top{k}_analysis_report.md')
+    
+    with open(report_path, 'w') as f:
+        f.write(f"# Top-{k} Statistical Analysis Report: CNN vs Transformer Chess Models\n\n")
+        f.write(f"**Analysis Date**: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write("---\n\n")
+        
+        # Executive Summary
+        f.write("## Executive Summary\n\n")
+        f.write(f"This report presents a comprehensive statistical analysis of {len(df):,} chess puzzle predictions ")
+        f.write(f"comparing CNN and Transformer models using Top-{k} accuracy metrics.\n\n")
+        
+        # Overall Performance
+        f.write("## Overall Performance\n\n")
+        f.write(f"### Top-{k} Accuracy\n\n")
+        f.write("| Model | Accuracy | 95% CI |\n")
+        f.write("|-------|----------|--------|\n")
+        f.write(f"| CNN | {bootstrap_results['cnn_mean']:.2f}% | ")
+        f.write(f"[{bootstrap_results['cnn_ci'][0]:.2f}, {bootstrap_results['cnn_ci'][1]:.2f}] |\n")
+        f.write(f"| Transformer | {bootstrap_results['trans_mean']:.2f}% | ")
+        f.write(f"[{bootstrap_results['trans_ci'][0]:.2f}, {bootstrap_results['trans_ci'][1]:.2f}] |\n")
+        f.write(f"| **Difference** | **{bootstrap_results['diff_mean']:.2f}%** | ")
+        f.write(f"**[{bootstrap_results['diff_ci'][0]:.2f}, {bootstrap_results['diff_ci'][1]:.2f}]** |\n\n")
+        
+        # Statistical Tests
+        f.write("## Statistical Tests\n\n")
+        f.write("### McNemar's Test\n\n")
+        f.write(f"- **Chi-square statistic**: {mcnemar_results['chi2']:.4f}\n")
+        f.write(f"- **P-value**: {mcnemar_results['p_value']:.6f}\n")
+        
+        if mcnemar_results['p_value'] < 0.05:
+            f.write(f"- **Result**: Statistically significant difference (p < 0.05)\n\n")
+        else:
+            f.write(f"- **Result**: No statistically significant difference (p >= 0.05)\n\n")
+        
+        f.write("**Contingency Table:**\n\n")
+        f.write(f"- CNN correct, Transformer wrong: {mcnemar_results['b']:,}\n")
+        f.write(f"- CNN wrong, Transformer correct: {mcnemar_results['c']:,}\n\n")
+        
+        # Prediction Agreement
+        f.write("## Prediction Agreement\n\n")
+        both_correct = (df[cnn_col].astype(bool) & df[trans_col].astype(bool)).sum()
+        both_wrong = (~df[cnn_col].astype(bool) & ~df[trans_col].astype(bool)).sum()
+        cnn_only = (df[cnn_col].astype(bool) & ~df[trans_col].astype(bool)).sum()
+        trans_only = (~df[cnn_col].astype(bool) & df[trans_col].astype(bool)).sum()
+        
+        f.write("| Category | Count | Percentage |\n")
+        f.write("|----------|-------|------------|\n")
+        f.write(f"| Both Correct | {both_correct:,} | {100*both_correct/len(df):.2f}% |\n")
+        f.write(f"| Both Wrong | {both_wrong:,} | {100*both_wrong/len(df):.2f}% |\n")
+        f.write(f"| CNN Only | {cnn_only:,} | {100*cnn_only/len(df):.2f}% |\n")
+        f.write(f"| Transformer Only | {trans_only:,} | {100*trans_only/len(df):.2f}% |\n\n")
+        
+        # Rating Stratification
+        f.write("## Rating Stratification\n\n")
+        f.write("Performance breakdown by puzzle difficulty rating:\n\n")
+        f.write(rating_df.to_markdown(index=False))
+        f.write("\n\n")
+        f.write(f"![Rating Stratification](top{k}_rating_stratification.png)\n\n")
+        
+        # Theme Stratification
+        f.write("## Theme Stratification\n\n")
+        f.write("Performance breakdown by puzzle theme (top themes by count):\n\n")
+        f.write(theme_df.to_markdown(index=False))
+        f.write("\n\n")
+        f.write(f"![Theme Stratification](top{k}_theme_stratification.png)\n\n")
+        
+        # Phase Stratification
+        f.write("## Game Phase Stratification\n\n")
+        f.write("Performance breakdown by game phase:\n\n")
+        f.write(phase_df.to_markdown(index=False))
+        f.write("\n\n")
+        f.write(f"![Phase Stratification](top{k}_phase_stratification.png)\n\n")
+        
+        # Visualizations
+        f.write("## Additional Visualizations\n\n")
+        f.write("### Bootstrap Analysis\n\n")
+        f.write(f"![Bootstrap Distribution](top{k}_bootstrap_distribution.png)\n\n")
+        f.write(f"![Bootstrap Confidence](top{k}_bootstrap_confidence.png)\n\n")
+        
+        # Key Findings
+        f.write("## Key Findings\n\n")
+        
+        # Find which model performs better overall
+        overall_diff = bootstrap_results['diff_mean']
+        if abs(overall_diff) < 0.5:
+            f.write(f"1. **Overall Performance**: The models show nearly identical top-{k} accuracy ")
+            f.write(f"(difference: {overall_diff:.2f}%).\n\n")
+        elif overall_diff > 0:
+            f.write(f"1. **Overall Performance**: Transformer outperforms CNN by {overall_diff:.2f}% ")
+            f.write(f"in top-{k} accuracy.\n\n")
+        else:
+            f.write(f"1. **Overall Performance**: CNN outperforms Transformer by {abs(overall_diff):.2f}% ")
+            f.write(f"in top-{k} accuracy.\n\n")
+        
+        # Rating insights
+        max_diff_rating = rating_df.loc[rating_df['Difference (%)'].abs().idxmax()]
+        f.write(f"2. **Rating Stratification**: Largest performance difference observed in ")
+        f.write(f"{max_diff_rating['Rating Bin']} rating range ")
+        f.write(f"({max_diff_rating['Difference (%)']:.2f}%).\n\n")
+        
+        # Theme insights
+        max_diff_theme = theme_df.loc[theme_df['Difference (%)'].abs().idxmax()]
+        f.write(f"3. **Theme Stratification**: Largest performance difference observed for ")
+        f.write(f"'{max_diff_theme['Theme']}' theme ")
+        f.write(f"({max_diff_theme['Difference (%)']:.2f}%).\n\n")
+        
+        # Statistical significance
+        if mcnemar_results['p_value'] < 0.05:
+            f.write(f"4. **Statistical Significance**: McNemar's test indicates a statistically ")
+            f.write(f"significant difference (p = {mcnemar_results['p_value']:.6f}).\n\n")
+        else:
+            f.write(f"4. **Statistical Significance**: McNemar's test does not indicate a statistically ")
+            f.write(f"significant difference (p = {mcnemar_results['p_value']:.6f}).\n\n")
+        
+        # Conclusions
+        f.write("## Conclusions\n\n")
+        f.write("This analysis reveals:\n\n")
+        f.write("- The models show different strengths across puzzle ratings and themes\n")
+        f.write("- Stratified analysis provides deeper insights than aggregate metrics alone\n")
+        f.write(f"- Top-{k} accuracy shows how often the correct move is within the top {k} predictions\n")
+        f.write("- Consider ensemble approaches to leverage complementary strengths\n\n")
+        
+        # Files Generated
+        f.write("## Files Generated\n\n")
+        f.write("This analysis generated the following output files:\n\n")
+        f.write(f"- `top{k}_analysis_report.md` - This comprehensive report\n")
+        f.write(f"- `top{k}_mcnemar_test.txt` - McNemar's test detailed results\n")
+        f.write(f"- `top{k}_bootstrap_confidence.png` - Bootstrap confidence intervals\n")
+        f.write(f"- `top{k}_bootstrap_distribution.png` - Bootstrap distribution plot\n")
+        f.write(f"- `top{k}_rating_stratification.csv` / `.png` - Performance by rating\n")
+        f.write(f"- `top{k}_theme_stratification.csv` / `.png` - Performance by theme\n")
+        f.write(f"- `top{k}_phase_stratification.csv` / `.png` - Performance by game phase\n\n")
+        
+        f.write("---\n\n")
+        f.write("*Report generated automatically by statistical_analysis.py*\n")
+    
+    print(f"✓ Saved comprehensive top-{k} markdown report to {report_path}")
 
 
 def bootstrap_analysis(
@@ -1518,11 +2221,82 @@ def main():
     top3_accuracy = None
     if args.generate_top3_summary:
         top3_accuracy = calculate_top3_accuracy(df)
-        generate_top3_accuracy_summary(args.output_dir, top3_accuracy, df)
+        # Add top-3 correctness columns to dataframe
+        df = add_top3_correct_columns(df)
+        
+        # Perform comprehensive top-3 analysis
+        print("\n" + "="*80)
+        print("RUNNING TOP-3 COMPREHENSIVE ANALYSIS")
+        print("="*80)
+        
+        top3_bootstrap_results = bootstrap_analysis_topk(
+            df, args.bootstrap_iterations, args.output_dir, args.seed,
+            'cnn_first_move_top3_correct', 'transformer_first_move_top3_correct', 3
+        )
+        
+        top3_mcnemar_results = mcnemar_test_topk(
+            df, args.output_dir, 
+            'cnn_first_move_top3_correct', 'transformer_first_move_top3_correct', 3
+        )
+        
+        top3_rating_df = rating_stratification_topk(
+            df, args.output_dir,
+            'cnn_first_move_top3_correct', 'transformer_first_move_top3_correct', 3
+        )
+        
+        top3_theme_df = theme_stratification_topk(
+            df, args.output_dir,
+            'cnn_first_move_top3_correct', 'transformer_first_move_top3_correct', 3, top_n=20
+        )
+        
+        top3_phase_df = phase_stratification_topk(
+            df, args.output_dir,
+            'cnn_first_move_top3_correct', 'transformer_first_move_top3_correct', 3
+        )
+        
+        # Generate comprehensive top-3 markdown report
+        generate_topk_markdown_report(
+            args.output_dir, df, top3_bootstrap_results, top3_mcnemar_results,
+            top3_rating_df, top3_theme_df, top3_phase_df, top3_accuracy, 3
+        )
     
-    # Generate Top-5 summary if requested
+    # Generate Top-5 comprehensive analysis if requested
     if args.generate_top5_summary:
-        generate_top5_accuracy_summary(args.output_dir, top5_accuracy, df)
+        # Perform comprehensive top-5 analysis
+        print("\n" + "="*80)
+        print("RUNNING TOP-5 COMPREHENSIVE ANALYSIS")
+        print("="*80)
+        
+        top5_bootstrap_results = bootstrap_analysis_topk(
+            df, args.bootstrap_iterations, args.output_dir, args.seed,
+            'cnn_first_move_top5_correct', 'transformer_first_move_top5_correct', 5
+        )
+        
+        top5_mcnemar_results = mcnemar_test_topk(
+            df, args.output_dir,
+            'cnn_first_move_top5_correct', 'transformer_first_move_top5_correct', 5
+        )
+        
+        top5_rating_df = rating_stratification_topk(
+            df, args.output_dir,
+            'cnn_first_move_top5_correct', 'transformer_first_move_top5_correct', 5
+        )
+        
+        top5_theme_df = theme_stratification_topk(
+            df, args.output_dir,
+            'cnn_first_move_top5_correct', 'transformer_first_move_top5_correct', 5, top_n=20
+        )
+        
+        top5_phase_df = phase_stratification_topk(
+            df, args.output_dir,
+            'cnn_first_move_top5_correct', 'transformer_first_move_top5_correct', 5
+        )
+        
+        # Generate comprehensive top-5 markdown report
+        generate_topk_markdown_report(
+            args.output_dir, df, top5_bootstrap_results, top5_mcnemar_results,
+            top5_rating_df, top5_theme_df, top5_phase_df, top5_accuracy, 5
+        )
     
     # Error pattern analysis
     error_pattern_analysis(df, args.output_dir)
@@ -1561,9 +2335,9 @@ def main():
     print(f"  - Comprehensive report: {os.path.join(args.output_dir, 'analysis_report.md')}")
     print(f"  - Summary statistics: {os.path.join(args.output_dir, 'summary_statistics.csv')}")
     if args.generate_top3_summary:
-        print(f"  - Top-3 accuracy summary: {os.path.join(args.output_dir, 'top3_accuracy_summary.md')}")
+        print(f"  - Top-3 comprehensive report: {os.path.join(args.output_dir, 'top3_analysis_report.md')}")
     if args.generate_top5_summary:
-        print(f"  - Top-5 accuracy summary: {os.path.join(args.output_dir, 'top5_accuracy_summary.md')}")
+        print(f"  - Top-5 comprehensive report: {os.path.join(args.output_dir, 'top5_analysis_report.md')}")
     print(f"  - Visualizations: {len([f for f in os.listdir(args.output_dir) if f.endswith('.png')])} PNG files")
     print("\n" + "="*80 + "\n")
 
