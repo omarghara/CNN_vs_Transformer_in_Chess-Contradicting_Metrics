@@ -1,0 +1,24 @@
+analysis_outputs/
+test_outputs/
+*.pyc
+__pycache__/
+test_output/
+
+
+*.png
+*.pptx
+*.pdf
+
+# Data
+*.csv
+*.pgn
+data/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+env/
