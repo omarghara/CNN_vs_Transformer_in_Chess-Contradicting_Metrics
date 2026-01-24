@@ -725,7 +725,7 @@ def theme_stratification(df: pd.DataFrame, output_dir: str, top_n: int = 20) -> 
     print(f"\n📊 Theme Stratification Analysis (Top {top_n} themes)...")
     
     # Parse themes and create weighted accuracy
-    theme_stats = defaultdict(lambda: {'cnn_first_move_correct': 0, 'trans_correct': 0, 'total': 0})
+    theme_stats = defaultdict(lambda: {'cnn_first_move_correct': 0, 'transformer_first_move_correct': 0, 'total': 0})
     
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing themes"):
         themes = parse_themes(row['Themes'])
@@ -738,8 +738,8 @@ def theme_stratification(df: pd.DataFrame, output_dir: str, top_n: int = 20) -> 
             theme_stats[theme]['total'] += weight
             if row['cnn_first_move_correct']:
                 theme_stats[theme]['cnn_first_move_correct'] += weight
-            if row['transformer_correct']:
-                theme_stats[theme]['trans_correct'] += weight
+            if row['transformer_first_move_correct']:
+                theme_stats[theme]['transformer_first_move_correct'] += weight
     
     # Calculate accuracy for each theme
     results = []
@@ -748,7 +748,7 @@ def theme_stratification(df: pd.DataFrame, output_dir: str, top_n: int = 20) -> 
             continue
         
         cnn_acc = (stats['cnn_first_move_correct'] / stats['total']) * 100
-        trans_acc = (stats['trans_correct'] / stats['total']) * 100
+        trans_acc = (stats['transformer_first_move_correct'] / stats['total']) * 100
         diff = trans_acc - cnn_acc
         
         results.append({
