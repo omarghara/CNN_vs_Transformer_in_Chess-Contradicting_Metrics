@@ -1,6 +1,6 @@
 # Statistical Analysis Report: CNN vs Transformer Chess Models
 
-**Analysis Date**: 2026-01-24 11:01:32
+**Analysis Date**: 2026-01-24 13:30:47
 
 ---
 
@@ -18,6 +18,13 @@ This report presents a comprehensive statistical analysis of 5,600,086 chess puz
 | Transformer | 70.91% | [70.87, 70.95] |
 | **Difference** | **5.11%** | **[5.08, 5.15]** |
 
+### Top-5 Accuracy
+
+| Model | Accuracy |
+|-------|----------|
+| CNN | 0.00% |
+| Transformer | 0.00% |
+| **Difference** | **0.00%** |
 
 ## Statistical Tests
 
@@ -122,7 +129,9 @@ Performance breakdown by game phase:
 
 3. **Theme Stratification**: Largest performance difference observed for 'pin' theme (8.74%).
 
-4. **Statistical Significance**: McNemar's test indicates a statistically significant difference (p = 0.000000).
+4. **Top-5 Accuracy**: The performance gap narrows to 0.00% when considering top-5 predictions.
+
+5. **Statistical Significance**: McNemar's test indicates a statistically significant difference (p = 0.000000).
 
 ## Conclusions
 
@@ -130,6 +139,7 @@ This analysis reveals:
 
 - The models show different strengths across puzzle ratings and themes
 - Stratified analysis provides deeper insights than aggregate metrics alone
+- Both models have substantial room for improvement (< 40% top-1 accuracy)
 - Consider ensemble approaches to leverage complementary strengths
 
 ## Files Generated
