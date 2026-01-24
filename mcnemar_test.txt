@@ -1,0 +1,15 @@
+McNemar's Test Results
+==================================================
+
+Contingency Table:
+  CNN correct, Transformer wrong (b): 343,786
+  CNN wrong, Transformer correct (c): 630,155
+
+Test Statistics:
+  Chi-square statistic: 84200.8206
+  P-value: 0.000000
+
+Interpretation: *** (highly significant)
+
+Null Hypothesis: The two models have equal performance
+Alternative Hypothesis: The two models have different performance
