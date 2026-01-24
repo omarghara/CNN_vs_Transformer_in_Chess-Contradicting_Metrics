@@ -491,6 +491,8 @@ def add_top3_correct_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add top-3 correctness columns to the DataFrame.
     
+    Uses the actual puzzle solution as ground truth (extracted from when first_move_correct==1).
+    
     Args:
         df: DataFrame with top5 moves columns
         
@@ -499,15 +501,22 @@ def add_top3_correct_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     print("\n📊 Adding Top-3 Correctness Columns...")
     
-    df_copy = prepare_ground_truth(df)
-    
     # Calculate top-3 correctness for each row
     cnn_top3_correct_list = []
     trans_top3_correct_list = []
     
-    for idx, row in tqdm(df_copy.iterrows(), total=len(df_copy), desc="Computing top-3 correctness"):
-        ground_truth = row['ground_truth']
-        if ground_truth is None:
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Computing top-3 correctness"):
+        # Determine ground truth: use the first_move when it's correct
+        # If either model got it correct, use that as ground truth
+        ground_truth = None
+        if row.get('cnn_first_move_correct', 0) == 1:
+            ground_truth = row.get('cnn_first_move', '')
+        elif row.get('transformer_first_move_correct', 0) == 1:
+            ground_truth = row.get('transformer_first_move', '')
+        
+        # If neither got it correct, we can't determine ground truth reliably
+        # In this case, mark both as incorrect for top-3
+        if not ground_truth:
             cnn_top3_correct_list.append(0)
             trans_top3_correct_list.append(0)
             continue
@@ -515,12 +524,14 @@ def add_top3_correct_columns(df: pd.DataFrame) -> pd.DataFrame:
         # CNN top-3 (first 3 from top-5)
         cnn_top5 = parse_top5_moves(row.get('cnn_top5_moves', ''))
         cnn_top3 = cnn_top5[:3] if len(cnn_top5) >= 3 else cnn_top5
-        cnn_top3_correct_list.append(1 if ground_truth in cnn_top3 else 0)
+        cnn_in_top3 = 1 if ground_truth in cnn_top3 else 0
+        cnn_top3_correct_list.append(cnn_in_top3)
         
         # Transformer top-3 (first 3 from top-5)
         trans_top5 = parse_top5_moves(row.get('transformer_top5_moves', ''))
         trans_top3 = trans_top5[:3] if len(trans_top5) >= 3 else trans_top5
-        trans_top3_correct_list.append(1 if ground_truth in trans_top3 else 0)
+        trans_in_top3 = 1 if ground_truth in trans_top3 else 0
+        trans_top3_correct_list.append(trans_in_top3)
     
     # Add columns to original dataframe
     df['cnn_first_move_top3_correct'] = cnn_top3_correct_list
