@@ -139,12 +139,12 @@ def auto_detect_csv_file() -> Optional[str]:
         Path to the CSV file or None if not found
     """
     possible_paths = [
+        'Data/results_first_move.csv',
+        'puzzles.csv',
+        'Data/puzzles.csv',
         'Data/results_full.csv',
         'results_full.csv',
         'results_first_move.csv',
-        'Data/results_first_move.csv',
-        'puzzles.csv',
-        'Data/puzzles.csv'
     ]
     
     for path in possible_paths:
@@ -260,7 +260,7 @@ def validate_data(df: pd.DataFrame) -> None:
     
     # Required columns
     required_cols = [
-        'cnn_correct', 'transformer_correct',
+        'cnn_first_move_correct', 'transformer_first_move_correct',
         'Rating', 'Themes', 'FEN'
     ]
     
@@ -290,8 +290,8 @@ def validate_data(df: pd.DataFrame) -> None:
     
     # Model accuracy
     print("\nModel Performance:")
-    cnn_acc = df['cnn_correct'].mean() * 100
-    transformer_acc = df['transformer_correct'].mean() * 100
+    cnn_acc = df['cnn_first_move_correct'].mean() * 100
+    transformer_acc = df['transformer_first_move_correct'].mean() * 100
     print(f"  CNN Accuracy: {cnn_acc:.2f}%")
     print(f"  Transformer Accuracy: {transformer_acc:.2f}%")
     print(f"  Difference: {transformer_acc - cnn_acc:+.2f}%")
@@ -320,10 +320,10 @@ def validate_data(df: pd.DataFrame) -> None:
         print(f"  ✓ All ratings valid (0-4000)")
     
     # Check for agreement
-    both_correct = (df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
-    both_wrong = (~df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
-    cnn_only = (df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
-    trans_only = (~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
+    both_correct = (df['cnn_first_move_correct'].astype(bool) & df['transformer_first_move_correct'].astype(bool)).sum()
+    both_wrong = (~df['cnn_first_move_correct'].astype(bool) & ~df['transformer_first_move_correct'].astype(bool)).sum()
+    cnn_only = (df['cnn_first_move_correct'].astype(bool) & ~df['transformer_first_move_correct'].astype(bool)).sum()
+    trans_only = (~df['cnn_first_move_correct'].astype(bool) & df['transformer_first_move_correct'].astype(bool)).sum()
     
     print(f"\nPrediction Agreement:")
     print(f"  Both correct: {both_correct:,} ({100*both_correct/len(df):.2f}%)")
@@ -426,8 +426,8 @@ def bootstrap_analysis(
     print(f"\n🔄 Bootstrap Analysis ({n_iterations} iterations)...")
     np.random.seed(seed)
     
-    cnn_correct = df['cnn_correct'].values
-    trans_correct = df['transformer_correct'].values
+    cnn_correct = df['cnn_first_move_correct'].values
+    trans_correct = df['transformer_first_move_correct'].values
     
     # Bootstrap sampling
     cnn_accs = []
@@ -527,8 +527,8 @@ def mcnemar_test(df: pd.DataFrame, output_dir: str) -> Dict[str, Any]:
     # Create contingency table
     # b: CNN correct, Transformer wrong
     # c: CNN wrong, Transformer correct
-    b = (df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
-    c = (~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
+    b = (df['cnn_first_move_correct'].astype(bool) & ~df['transformer_first_move_correct'].astype(bool)).sum()
+    c = (~df['cnn_first_move_correct'].astype(bool) & df['transformer_first_move_correct'].astype(bool)).sum()
     
     # McNemar's test statistic
     if b + c > 0:
@@ -623,15 +623,15 @@ def rating_stratification(df: pd.DataFrame, output_dir: str) -> pd.DataFrame:
         if len(bin_data) == 0:
             continue
         
-        cnn_acc = bin_data['cnn_correct'].mean() * 100
-        trans_acc = bin_data['transformer_correct'].mean() * 100
+        cnn_acc = bin_data['cnn_first_move_correct'].mean() * 100
+        trans_acc = bin_data['transformer_first_move_correct'].mean() * 100
         diff = trans_acc - cnn_acc
         count = len(bin_data)
         
         # Calculate effect size
         effect_size = cohens_d(
-            bin_data['transformer_correct'].values,
-            bin_data['cnn_correct'].values
+            bin_data['transformer_first_move_correct'].values,
+            bin_data['cnn_first_move_correct'].values
         )
         
         results.append({
@@ -725,7 +725,7 @@ def theme_stratification(df: pd.DataFrame, output_dir: str, top_n: int = 20) -> 
     print(f"\n📊 Theme Stratification Analysis (Top {top_n} themes)...")
     
     # Parse themes and create weighted accuracy
-    theme_stats = defaultdict(lambda: {'cnn_correct': 0, 'trans_correct': 0, 'total': 0})
+    theme_stats = defaultdict(lambda: {'cnn_first_move_correct': 0, 'trans_correct': 0, 'total': 0})
     
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing themes"):
         themes = parse_themes(row['Themes'])
@@ -736,8 +736,8 @@ def theme_stratification(df: pd.DataFrame, output_dir: str, top_n: int = 20) -> 
         
         for theme in themes:
             theme_stats[theme]['total'] += weight
-            if row['cnn_correct']:
-                theme_stats[theme]['cnn_correct'] += weight
+            if row['cnn_first_move_correct']:
+                theme_stats[theme]['cnn_first_move_correct'] += weight
             if row['transformer_correct']:
                 theme_stats[theme]['trans_correct'] += weight
     
@@ -747,7 +747,7 @@ def theme_stratification(df: pd.DataFrame, output_dir: str, top_n: int = 20) -> 
         if stats['total'] < 10:  # Skip themes with very few puzzles
             continue
         
-        cnn_acc = (stats['cnn_correct'] / stats['total']) * 100
+        cnn_acc = (stats['cnn_first_move_correct'] / stats['total']) * 100
         trans_acc = (stats['trans_correct'] / stats['total']) * 100
         diff = trans_acc - cnn_acc
         
@@ -881,15 +881,15 @@ def phase_stratification(df: pd.DataFrame, output_dir: str) -> pd.DataFrame:
         if len(phase_data) == 0:
             continue
         
-        cnn_acc = phase_data['cnn_correct'].mean() * 100
-        trans_acc = phase_data['transformer_correct'].mean() * 100
+        cnn_acc = phase_data['cnn_first_move_correct'].mean() * 100
+        trans_acc = phase_data['transformer_first_move_correct'].mean() * 100
         diff = trans_acc - cnn_acc
         count = len(phase_data)
         
         # Calculate effect size
         effect_size = cohens_d(
-            phase_data['transformer_correct'].values,
-            phase_data['cnn_correct'].values
+            phase_data['transformer_first_move_correct'].values,
+            phase_data['cnn_first_move_correct'].values
         )
         
         results.append({
@@ -963,10 +963,10 @@ def error_pattern_analysis(df: pd.DataFrame, output_dir: str) -> None:
     print("\n📊 Error Pattern Analysis...")
     
     # Create confusion matrix style data
-    both_correct = (df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
-    both_wrong = (~df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
-    cnn_only = (df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
-    trans_only = (~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
+    both_correct = (df['cnn_first_move_correct'].astype(bool) & df['transformer_first_move_correct'].astype(bool)).sum()
+    both_wrong = (~df['cnn_first_move_correct'].astype(bool) & ~df['transformer_first_move_correct'].astype(bool)).sum()
+    cnn_only = (df['cnn_first_move_correct'].astype(bool) & ~df['transformer_first_move_correct'].astype(bool)).sum()
+    trans_only = (~df['cnn_first_move_correct'].astype(bool) & df['transformer_first_move_correct'].astype(bool)).sum()
     
     total = len(df)
     
@@ -1006,8 +1006,8 @@ def feature_correlation_analysis(df: pd.DataFrame, output_dir: str) -> None:
     print("\n📊 Feature Correlation Analysis...")
     
     # Create error indicators
-    df['cnn_error'] = (~df['cnn_correct'].astype(bool)).astype(int)
-    df['trans_error'] = (~df['transformer_correct'].astype(bool)).astype(int)
+    df['cnn_error'] = (~df['cnn_first_move_correct'].astype(bool)).astype(int)
+    df['trans_error'] = (~df['transformer_first_move_correct'].astype(bool)).astype(int)
     
     # Select numeric features
     features = ['Rating', 'RatingDeviation', 'Popularity', 'NbPlays']
@@ -1074,13 +1074,13 @@ def generate_summary_statistics(df: pd.DataFrame, output_dir: str, **kwargs) -> 
     
     stats['Value'].extend([
         f"{len(df):,}",
-        f"{df['cnn_correct'].mean() * 100:.2f}",
-        f"{df['transformer_correct'].mean() * 100:.2f}",
-        f"{(df['transformer_correct'].mean() - df['cnn_correct'].mean()) * 100:.2f}",
-        f"{((df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum() / len(df)) * 100:.2f}",
-        f"{((~df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum() / len(df)) * 100:.2f}",
-        f"{((df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum() / len(df)) * 100:.2f}",
-        f"{((~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum() / len(df)) * 100:.2f}"
+        f"{df['cnn_first_move_correct'].mean() * 100:.2f}",
+        f"{df['transformer_first_move_correct'].mean() * 100:.2f}",
+        f"{(df['transformer_first_move_correct'].mean() - df['cnn_first_move_correct'].mean()) * 100:.2f}",
+        f"{((df['cnn_first_move_correct'].astype(bool) & df['transformer_first_move_correct'].astype(bool)).sum() / len(df)) * 100:.2f}",
+        f"{((~df['cnn_first_move_correct'].astype(bool) & ~df['transformer_first_move_correct'].astype(bool)).sum() / len(df)) * 100:.2f}",
+        f"{((df['cnn_first_move_correct'].astype(bool) & ~df['transformer_first_move_correct'].astype(bool)).sum() / len(df)) * 100:.2f}",
+        f"{((~df['cnn_first_move_correct'].astype(bool) & df['transformer_first_move_correct'].astype(bool)).sum() / len(df)) * 100:.2f}"
     ])
     
     # Add additional statistics from kwargs
@@ -1173,10 +1173,10 @@ def generate_markdown_report(
         
         # Prediction Agreement
         f.write("## Prediction Agreement\n\n")
-        both_correct = (df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
-        both_wrong = (~df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
-        cnn_only = (df['cnn_correct'].astype(bool) & ~df['transformer_correct'].astype(bool)).sum()
-        trans_only = (~df['cnn_correct'].astype(bool) & df['transformer_correct'].astype(bool)).sum()
+        both_correct = (df['cnn_first_move_correct'].astype(bool) & df['transformer_first_move_correct'].astype(bool)).sum()
+        both_wrong = (~df['cnn_first_move_correct'].astype(bool) & ~df['transformer_first_move_correct'].astype(bool)).sum()
+        cnn_only = (df['cnn_first_move_correct'].astype(bool) & ~df['transformer_first_move_correct'].astype(bool)).sum()
+        trans_only = (~df['cnn_first_move_correct'].astype(bool) & df['transformer_first_move_correct'].astype(bool)).sum()
         
         f.write("| Category | Count | Percentage |\n")
         f.write("|----------|-------|------------|\n")
