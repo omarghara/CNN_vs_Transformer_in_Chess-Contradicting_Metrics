@@ -28,6 +28,9 @@ Usage Examples:
 
     # Skip calibration analysis
     python statistical_analysis.py --skip-calibration
+    
+    # Generate Top-3 and Top-5 accuracy summary markdown files
+    python statistical_analysis.py --generate-top3-summary --generate-top5-summary
 
 Requirements:
     numpy, pandas, matplotlib, seaborn, scipy, chess, tqdm, scikit-learn
@@ -119,6 +122,18 @@ def parse_arguments() -> argparse.Namespace:
         type=int,
         default=100000,
         help='Chunk size for reading large CSV files (default: 100000)'
+    )
+    
+    parser.add_argument(
+        '--generate-top3-summary',
+        action='store_true',
+        help='Generate separate Top-3 accuracy summary markdown file'
+    )
+    
+    parser.add_argument(
+        '--generate-top5-summary',
+        action='store_true',
+        help='Generate separate Top-5 accuracy summary markdown file'
     )
     
     return parser.parse_args()
@@ -230,7 +245,9 @@ def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
         'popularity': 'Popularity',
         'nbplays': 'NbPlays',
         'gameurl': 'GameUrl',
-        'openingtags': 'OpeningTags'
+        'openingtags': 'OpeningTags',
+        'cnn_correct': 'cnn_first_move_correct',
+        'transformer_correct': 'transformer_first_move_correct'
     }
     
     # Rename columns
@@ -357,6 +374,37 @@ def parse_top5_moves(moves_str: str) -> List[str]:
         return []
 
 
+def get_first_move(moves_str: str) -> Optional[str]:
+    """
+    Extract the first move from the Moves column (ground truth).
+    
+    Args:
+        moves_str: Space-separated string of moves
+        
+    Returns:
+        First move or None if invalid
+    """
+    if pd.isna(moves_str):
+        return None
+    moves = str(moves_str).strip().split()
+    return moves[0] if moves else None
+
+
+def prepare_ground_truth(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Prepare DataFrame with ground truth column.
+    
+    Args:
+        df: Input DataFrame with Moves column
+        
+    Returns:
+        DataFrame copy with ground_truth column added
+    """
+    df_copy = df.copy()
+    df_copy['ground_truth'] = df_copy['Moves'].apply(get_first_move)
+    return df_copy
+
+
 def calculate_top5_accuracy(df: pd.DataFrame) -> Tuple[float, float]:
     """
     Calculate top-5 accuracy for both models.
@@ -369,15 +417,7 @@ def calculate_top5_accuracy(df: pd.DataFrame) -> Tuple[float, float]:
     """
     print("\n📊 Calculating Top-5 Accuracy...")
     
-    # Parse the first move from the Moves column (ground truth)
-    def get_first_move(moves_str):
-        if pd.isna(moves_str):
-            return None
-        moves = str(moves_str).strip().split()
-        return moves[0] if moves else None
-    
-    df_copy = df.copy()
-    df_copy['ground_truth'] = df_copy['Moves'].apply(get_first_move)
+    df_copy = prepare_ground_truth(df)
     
     # Calculate top-5 accuracy
     cnn_top5_correct = []
@@ -403,6 +443,128 @@ def calculate_top5_accuracy(df: pd.DataFrame) -> Tuple[float, float]:
     print(f"  Transformer Top-5 Accuracy: {trans_top5_acc:.2f}%")
     
     return cnn_top5_acc, trans_top5_acc
+
+
+def calculate_top3_accuracy(df: pd.DataFrame) -> Tuple[float, float]:
+    """
+    Calculate top-3 accuracy for both models.
+    
+    Args:
+        df: DataFrame with top5 moves columns (contains top-3 as well)
+        
+    Returns:
+        Tuple of (CNN top-3 accuracy, Transformer top-3 accuracy)
+    """
+    print("\n📊 Calculating Top-3 Accuracy...")
+    
+    df_copy = prepare_ground_truth(df)
+    
+    # Calculate top-3 accuracy
+    cnn_top3_correct = []
+    trans_top3_correct = []
+    
+    for idx, row in tqdm(df_copy.iterrows(), total=len(df_copy), desc="Computing top-3"):
+        ground_truth = row['ground_truth']
+        if ground_truth is None:
+            continue
+        
+        # CNN top-3 (first 3 from top-5)
+        cnn_top5 = parse_top5_moves(row.get('cnn_top5_moves', ''))
+        cnn_top3 = cnn_top5[:3] if len(cnn_top5) >= 3 else cnn_top5
+        cnn_top3_correct.append(ground_truth in cnn_top3)
+        
+        # Transformer top-3 (first 3 from top-5)
+        trans_top5 = parse_top5_moves(row.get('transformer_top5_moves', ''))
+        trans_top3 = trans_top5[:3] if len(trans_top5) >= 3 else trans_top5
+        trans_top3_correct.append(ground_truth in trans_top3)
+    
+    cnn_top3_acc = np.mean(cnn_top3_correct) * 100 if cnn_top3_correct else 0
+    trans_top3_acc = np.mean(trans_top3_correct) * 100 if trans_top3_correct else 0
+    
+    print(f"  CNN Top-3 Accuracy: {cnn_top3_acc:.2f}%")
+    print(f"  Transformer Top-3 Accuracy: {trans_top3_acc:.2f}%")
+    
+    return cnn_top3_acc, trans_top3_acc
+
+
+def generate_topk_accuracy_summary(
+    output_dir: str,
+    topk_accuracy: Tuple[float, float],
+    df: pd.DataFrame,
+    k: int
+) -> None:
+    """
+    Generate a separate markdown file for Top-K accuracy summary.
+    
+    Args:
+        output_dir: Directory for output files
+        topk_accuracy: Tuple of (CNN top-k, Transformer top-k) accuracy
+        df: Main DataFrame
+        k: Value of k (3 or 5)
+    """
+    print(f"\n📝 Generating Top-{k} Accuracy Summary...")
+    
+    summary_path = os.path.join(output_dir, f'top{k}_accuracy_summary.md')
+    
+    with open(summary_path, 'w') as f:
+        f.write(f"# Top-{k} Accuracy Summary: CNN vs Transformer\n\n")
+        f.write(f"**Analysis Date**: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write(f"**Dataset Size**: {len(df):,} chess puzzles\n\n")
+        f.write("---\n\n")
+        
+        f.write(f"## Top-{k} Accuracy\n\n")
+        f.write("| Model | Accuracy |\n")
+        f.write("|-------|----------|\n")
+        f.write(f"| CNN | {topk_accuracy[0]:.2f}% |\n")
+        f.write(f"| Transformer | {topk_accuracy[1]:.2f}% |\n")
+        f.write(f"| **Difference** | **{topk_accuracy[1] - topk_accuracy[0]:.2f}%** |\n\n")
+        
+        # Analysis
+        diff = topk_accuracy[1] - topk_accuracy[0]
+        f.write("## Analysis\n\n")
+        if abs(diff) < 0.5:
+            f.write(f"The models show nearly identical top-{k} accuracy (difference: {diff:.2f}%).\n\n")
+        elif diff > 0:
+            f.write(f"The Transformer model outperforms CNN by {diff:.2f}% in top-{k} accuracy.\n\n")
+        else:
+            f.write(f"The CNN model outperforms Transformer by {abs(diff):.2f}% in top-{k} accuracy.\n\n")
+        
+        f.write("---\n\n")
+        f.write("*Summary generated automatically by statistical_analysis.py*\n")
+    
+    print(f"✓ Saved Top-{k} accuracy summary to {summary_path}")
+
+
+def generate_top3_accuracy_summary(
+    output_dir: str,
+    top3_accuracy: Tuple[float, float],
+    df: pd.DataFrame
+) -> None:
+    """
+    Generate a separate markdown file for Top-3 accuracy summary.
+    
+    Args:
+        output_dir: Directory for output files
+        top3_accuracy: Tuple of (CNN top-3, Transformer top-3) accuracy
+        df: Main DataFrame
+    """
+    generate_topk_accuracy_summary(output_dir, top3_accuracy, df, 3)
+
+
+def generate_top5_accuracy_summary(
+    output_dir: str,
+    top5_accuracy: Tuple[float, float],
+    df: pd.DataFrame
+) -> None:
+    """
+    Generate a separate markdown file for Top-5 accuracy summary.
+    
+    Args:
+        output_dir: Directory for output files
+        top5_accuracy: Tuple of (CNN top-5, Transformer top-5) accuracy
+        df: Main DataFrame
+    """
+    generate_topk_accuracy_summary(output_dir, top5_accuracy, df, 5)
 
 
 def bootstrap_analysis(
@@ -1352,6 +1514,16 @@ def main():
     # Top-5 accuracy
     top5_accuracy = calculate_top5_accuracy(df)
     
+    # Top-3 accuracy (calculated only if summary requested)
+    top3_accuracy = None
+    if args.generate_top3_summary:
+        top3_accuracy = calculate_top3_accuracy(df)
+        generate_top3_accuracy_summary(args.output_dir, top3_accuracy, df)
+    
+    # Generate Top-5 summary if requested
+    if args.generate_top5_summary:
+        generate_top5_accuracy_summary(args.output_dir, top5_accuracy, df)
+    
     # Error pattern analysis
     error_pattern_analysis(df, args.output_dir)
     
@@ -1359,16 +1531,20 @@ def main():
     feature_correlation_analysis(df, args.output_dir)
     
     # Generate summary statistics
-    generate_summary_statistics(
-        df, args.output_dir,
-        **{
-            'CNN Top-5 Accuracy (%)': top5_accuracy[0],
-            'Transformer Top-5 Accuracy (%)': top5_accuracy[1],
-            'McNemar Chi-square': mcnemar_results['chi2'],
-            'McNemar P-value': mcnemar_results['p_value'],
-            'Bootstrap Iterations': args.bootstrap_iterations
-        }
-    )
+    summary_stats = {
+        'CNN Top-5 Accuracy (%)': top5_accuracy[0],
+        'Transformer Top-5 Accuracy (%)': top5_accuracy[1],
+        'McNemar Chi-square': mcnemar_results['chi2'],
+        'McNemar P-value': mcnemar_results['p_value'],
+        'Bootstrap Iterations': args.bootstrap_iterations
+    }
+    
+    # Add Top-3 to summary if calculated
+    if top3_accuracy is not None:
+        summary_stats['CNN Top-3 Accuracy (%)'] = top3_accuracy[0]
+        summary_stats['Transformer Top-3 Accuracy (%)'] = top3_accuracy[1]
+    
+    generate_summary_statistics(df, args.output_dir, **summary_stats)
     
     # Generate markdown report
     generate_markdown_report(
@@ -1384,6 +1560,10 @@ def main():
     print("\nKey outputs:")
     print(f"  - Comprehensive report: {os.path.join(args.output_dir, 'analysis_report.md')}")
     print(f"  - Summary statistics: {os.path.join(args.output_dir, 'summary_statistics.csv')}")
+    if args.generate_top3_summary:
+        print(f"  - Top-3 accuracy summary: {os.path.join(args.output_dir, 'top3_accuracy_summary.md')}")
+    if args.generate_top5_summary:
+        print(f"  - Top-5 accuracy summary: {os.path.join(args.output_dir, 'top5_accuracy_summary.md')}")
     print(f"  - Visualizations: {len([f for f in os.listdir(args.output_dir) if f.endswith('.png')])} PNG files")
     print("\n" + "="*80 + "\n")
 

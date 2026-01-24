@@ -2,3 +2,4 @@ analysis_outputs/
 test_outputs/
 *.pyc
 __pycache__/
+test_output/
