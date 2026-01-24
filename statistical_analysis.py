@@ -491,10 +491,18 @@ def add_top3_correct_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add top-3 correctness columns to the DataFrame.
     
-    Uses the actual puzzle solution as ground truth (extracted from when first_move_correct==1).
+    Uses a practical ground truth extraction approach: when either model has 
+    first_move_correct==1, use that model's first_move as the ground truth.
+    This approach assumes that if a model got the top-1 correct, that move is 
+    the actual puzzle solution. When neither model is correct for top-1, both 
+    are marked as incorrect for top-3 as well (conservative approach).
+    
+    Note: This method provides consistent cross-model comparison but may slightly
+    underestimate accuracy in cases where neither model's top-1 is correct but
+    the actual solution is in their top-3 predictions.
     
     Args:
-        df: DataFrame with top5 moves columns
+        df: DataFrame with first_move, first_move_correct, and top5_moves columns
         
     Returns:
         DataFrame with added columns: cnn_first_move_top3_correct and transformer_first_move_top3_correct
@@ -2232,7 +2240,7 @@ def main():
     top3_accuracy = None
     if args.generate_top3_summary:
         top3_accuracy = calculate_top3_accuracy(df)
-        # Add top-3 correctness columns to dataframe
+        # Add top-3 correctness columns to dataframe (modifies df in-place and returns it)
         df = add_top3_correct_columns(df)
         
         # Perform comprehensive top-3 analysis
